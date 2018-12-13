@@ -18,7 +18,10 @@ package com.ncc.neon.connect
 
 class DerbyConnectionClientFactory implements ConnectionClientFactory{
 	static {
-		System.setProperty("derby.system.home", System.getProperty("catalina.base"))
+        String catalinaBase = System.getProperty("catalina.base")
+        if (catalinaBase != null) {
+            System.setProperty("derby.system.home", catalinaBase)
+        }
 	}
 
     @Override
