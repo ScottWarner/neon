@@ -26,22 +26,3 @@ dependencies {
     compile "org.apache.hadoop:hadoop-common:$hadoopVersion"
     compile "org.apache.hadoop:hadoop-hdfs:$hadoopVersion"
 }
-
-if (project.hasProperty("useElasticsearch1") && project.getProperty("useElasticsearch1") == "true") {
-    sourceSets {
-        main {
-            groovy {
-                exclude '**/ElasticSearch2*.groovy'
-            }
-        }
-    }
-} else {
-    sourceSets {
-        main {
-            groovy {
-                exclude '**/ElasticSearch1*.groovy'
-            }
-        }
-    }
-}
-
