@@ -69,7 +69,7 @@ apply from: "gradle/signing.gradle"
 apply from: "${rootDir}/gradle/groovy.gradle"
 apply from: "${rootDir}/gradle/deploy.gradle"
 
-sourceCompatibility = 1.7
+sourceCompatibility = 1.8
 
 configurations {
     // using slf4j

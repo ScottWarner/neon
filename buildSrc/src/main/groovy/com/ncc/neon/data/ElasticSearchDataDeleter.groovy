@@ -16,9 +16,12 @@
 
 package com.ncc.neon.data
 
+import org.apache.http.HttpHost
 import org.elasticsearch.action.admin.indices.delete.DeleteIndexRequest
-import org.elasticsearch.action.admin.indices.delete.DeleteIndexResponse
-import org.elasticsearch.client.transport.TransportClient
+import org.elasticsearch.action.support.master.AcknowledgedResponse
+import org.elasticsearch.client.RequestOptions
+import org.elasticsearch.client.RestClient
+import org.elasticsearch.client.RestHighLevelClient
 import org.elasticsearch.ElasticsearchException
 import org.gradle.api.DefaultTask
 import org.gradle.api.tasks.TaskAction
@@ -26,46 +29,36 @@ import org.gradle.api.tasks.TaskAction
 class ElasticSearchDataDeleter extends DefaultTask{
     // default value. build will override this
     String host = "elastic:10000"
-    String databaseName = "integration-test"
+    String databaseName = "neonintegrationtest"
 
     @TaskAction
     void run(){
         String[] connectionUrl = host.split(':', 2)
         String hostName = connectionUrl[0]
-        int port = connectionUrl.length == 2 ? Integer.parseInt(connectionUrl[1]) : 9300
+        int port = connectionUrl.length == 2 ? Integer.parseInt(connectionUrl[1]) : 9200
 
-        TransportClient client = ElasticSearchTransportConnector.connectViaTransport(hostName, port)
-        deleteIndex(client)
+        RestHighLevelClient client = new RestHighLevelClient(RestClient.builder(new HttpHost(host, port)))
+
+        deleteIndex(client, databaseName)
     }
 
     /**
      * Delete the index.  Code is from:
      * http://programcreek.com/java-api-examples/index.php?api=org.elasticsearch.action.admin.indices.delete.DeleteIndexRequest
      */
-    def deleteIndex(TransportClient client) {
+    def deleteIndex(RestHighLevelClient client, indexName) {
         try {
             final DeleteIndexRequest deleteIndexRequest = new DeleteIndexRequest(databaseName)
-            final DeleteIndexResponse deleteIndexResponse = client.admin().indices().delete(deleteIndexRequest).actionGet()
-            if (!deleteIndexResponse.acknowledged) {
-                println("Index " + databaseName + " not deleted")
+            final AcknowledgedResponse deleteIndexResponse = client.indices().delete(deleteIndexRequest, RequestOptions.DEFAULT)
+
+            if (!deleteIndexResponse.isAcknowledged()) {
+                println("Index " + indexName + " not deleted")
             } else {
-                println("Index " + databaseName + " deleted")
+                println("Index " + indexName + " deleted")
             }
         }
         catch (ElasticsearchException e) {
-            // Depending on whether we're connecting to Elasticsearch 1 or 2, the exception has
-            // different names. Rather than doing a bunch of conditional compilation stuff for this
-            // case, just do an ugly name check
-            def exceptionClass = e.getClass().getName()
-            if (exceptionClass == "org.elasticsearch.index.IndexNotFoundException" || exceptionClass == "org.elasticsearch.indices.IndexMissingException") {
-                // Do nothing here.  this just means that the index did not exist when we tried to delete it
-                println("Index already deleted")
-            } else
-            {
-                // The exception was apparently not about the index already being deleted, so let it
-                // continue to unwind the stack
-                throw e
-            }
+            // Ignore, meh
         }
     }
 }

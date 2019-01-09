@@ -16,24 +16,24 @@
 
 package com.ncc.neon.property
 
-import com.ncc.neon.connect.ConnectionManager
-import com.ncc.neon.connect.ConnectionInfo
-import com.ncc.neon.connect.DataSources
-
+import com.ncc.neon.connect.ElasticSearchRestConnector
 import org.springframework.stereotype.Component
 import org.springframework.beans.factory.annotation.Value
-import org.springframework.beans.factory.annotation.Autowired
 
-import org.elasticsearch.client.Client
-import org.elasticsearch.action.search.SearchResponse
+import org.elasticsearch.action.admin.indices.get.GetIndexRequest
+import org.elasticsearch.action.admin.indices.flush.FlushRequest
+import org.elasticsearch.action.delete.DeleteRequest
+import org.elasticsearch.action.get.GetRequest
 import org.elasticsearch.action.get.GetResponse
-import org.elasticsearch.action.admin.indices.exists.indices.IndicesExistsRequest
-import org.elasticsearch.action.admin.indices.exists.indices.IndicesExistsResponse
+import org.elasticsearch.action.index.IndexRequest
+import org.elasticsearch.action.search.SearchResponse
+import org.elasticsearch.action.search.SearchRequest
+import org.elasticsearch.client.RestHighLevelClient
+import org.elasticsearch.client.RequestOptions
+import org.elasticsearch.index.query.QueryBuilders
 import org.elasticsearch.search.SearchHits
 import org.elasticsearch.search.SearchHit
-import org.elasticsearch.index.query.QueryBuilders
-import org.elasticsearch.index.query.MatchAllQueryBuilder
-import org.elasticsearch.action.admin.indices.flush.FlushRequest
+import org.elasticsearch.search.builder.SearchSourceBuilder
 
 @Component("elasticsearch")
 class ElasticSearchProperty implements PropertyInterface {
@@ -52,15 +52,14 @@ class ElasticSearchProperty implements PropertyInterface {
 
     private final String propertiesTypeName = "properties"
 
-    @Autowired
-    private ConnectionManager connectionManager
-
     public Map getProperty(String key) {
-        Client client = getClient()
+        RestHighLevelClient client = getClient()
         Map toReturn = [key: key, value: null]
 
         if (doesDBExist(client)) {
-            GetResponse resp = client.prepareGet(propertiesDatabaseName, propertiesTypeName, key).get()
+            GetRequest request = new GetRequest(propertiesDatabaseName, propertiesTypeName, key)
+
+            GetResponse resp = client.get(request, RequestOptions.DEFAULT)
 
             if (resp.isExists()) {
                 String value = resp.getSourceAsMap().get("value")
@@ -72,36 +71,35 @@ class ElasticSearchProperty implements PropertyInterface {
     }
 
     public void setProperty(String key, String value) {
-        Client client = getClient()
+        RestHighLevelClient client = getClient()
 
         Map<String, String> json = [:]
         json.put("value", value)
 
-        client.prepareIndex(propertiesDatabaseName, propertiesTypeName, key)
-            .setSource(json)
-            .get()
+        IndexRequest request = new IndexRequest(propertiesDatabaseName, propertiesTypeName, key)
+        request.source(json)
 
-        client.admin().indices().flush(new FlushRequest(propertiesDatabaseName)).actionGet()
+        client.index(request, RequestOptions.DEFAULT)
+
+        flush(client)
     }
 
     public void remove(String key) {
-        Client client = getClient()
-        client.prepareDelete(propertiesDatabaseName, propertiesTypeName, key).get()
-        client.admin().indices().flush(new FlushRequest(propertiesDatabaseName)).actionGet()
+        RestHighLevelClient client = getClient()
+        DeleteRequest request = new DeleteRequest(propertiesDatabaseName, propertiesTypeName, key)
+        client.delete(request, RequestOptions.DEFAULT)
+
+        flush(client)
     }
 
     public Set<String> propertyNames() {
-        Client client = getClient()
+        RestHighLevelClient client = getClient()
         Set<String> toReturn = [] as Set
 
         if (doesDBExist(client)) {
-            MatchAllQueryBuilder query = QueryBuilders.matchAllQuery()
+            SearchRequest request = getSearchAllRequest()
 
-            SearchResponse resp = client.prepareSearch(propertiesDatabaseName)
-                .setTypes(propertiesTypeName)
-                .setQuery(query)
-                .execute()
-                .actionGet()
+            SearchResponse resp = client.search(request, RequestOptions.DEFAULT)
 
             SearchHits hits = resp.getHits()
             for (SearchHit hit : hits.getHits()) {
@@ -113,38 +111,47 @@ class ElasticSearchProperty implements PropertyInterface {
     }
 
     public void removeAll() {
-        Client client = getClient()
+        RestHighLevelClient client = getClient()
 
         if (doesDBExist(client)) {
-            MatchAllQueryBuilder query = QueryBuilders.matchAllQuery()
+            SearchRequest request = getSearchAllRequest()
 
-            SearchResponse resp = client.prepareSearch(propertiesDatabaseName)
-                .setTypes(propertiesTypeName)
-                .setQuery(query)
-                .execute()
-                .actionGet()
+            SearchResponse resp = client.search(request, RequestOptions.DEFAULT)
 
             SearchHits hits = resp.getHits()
             for (SearchHit hit : hits.getHits()) {
-                client.prepareDelete(propertiesDatabaseName, propertiesTypeName, hit.getId()).get()
+                DeleteRequest deleteRequest = new DeleteRequest(propertiesDatabaseName, propertiesTypeName, hit.getId())
+
+                client.delete(deleteRequest, RequestOptions.DEFAULT)
             }
-            client.admin().indices().flush(new FlushRequest(propertiesDatabaseName)).actionGet()
+
+            flush(client)
         }
     }
 
-    private boolean doesDBExist(Client client) {
-        IndicesExistsResponse resp = client.admin().indices()
-            .exists(new IndicesExistsRequest(propertiesDatabaseName))
-            .actionGet()
+    private SearchRequest getSearchAllRequest() {
+        SearchRequest request = new SearchRequest(propertiesDatabaseName)
+        SearchSourceBuilder sourceBuilder = new SearchSourceBuilder()
+        sourceBuilder.query(QueryBuilders.matchAllQuery())
+        request.source(sourceBuilder)
 
-        return resp.isExists()
+        return request
     }
 
-    private Client getClient() {
+    private void flush(RestHighLevelClient client) {
+        client.indices().flush(new FlushRequest(propertiesDatabaseName), RequestOptions.DEFAULT)
+    }
+
+    private boolean doesDBExist(RestHighLevelClient client) {
+        GetIndexRequest request = new GetIndexRequest()
+        request.indices((String[]) [propertiesDatabaseName])
+
+        return client.indices().exists(request, RequestOptions.DEFAULT)
+    }
+
+    private RestHighLevelClient getClient() {
         def host = elasticSearchHost ?: "localhost"
-        def port = elasticSearchPort ?: 9300
-        def connInfo = new ConnectionInfo(dataSource: DataSources.elasticsearch, host: (host + ":" + port))
-        connectionManager.currentRequest = connInfo
-        return connectionManager.connection.client
+        def port = elasticSearchPort ?: "9200"
+        return ElasticSearchRestConnector.connectViaRest(host, Integer.parseInt(port))
     }
 }
